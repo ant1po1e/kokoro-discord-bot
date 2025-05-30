@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv
 from enum import Enum
 
-from keep_alive import keep_alive
+from bot import keep_alive
 
 # Load .env
 load_dotenv()
