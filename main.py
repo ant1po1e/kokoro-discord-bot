@@ -6,10 +6,14 @@ import os
 from dotenv import load_dotenv
 from enum import Enum
 
+from keep_alive import keep_alive
+
 # Load .env
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID'))  # Add GUILD_ID in .env for faster testing
+
+keep_alive()
 
 # Logging
 logging.basicConfig(level=logging.INFO)
