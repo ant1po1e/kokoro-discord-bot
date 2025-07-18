@@ -11,7 +11,7 @@ from keep_alive import keep_alive
 # Load .env
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-GUILD_ID = int(os.getenv('GUILD_ID'))  # Add GUILD_ID in .env for faster testing
+GUILD_ID = int(os.getenv('GUILD_ID'))
 
 keep_alive()
 
@@ -20,6 +20,8 @@ logging.basicConfig(level=logging.INFO)
 
 # Setup intents and bot
 intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="am!", intents=intents)
+tree = bot.tree
 
 class EffectType(app_commands.Transform, str, Enum):
     HORIZONTAL = "horizontal"
@@ -27,32 +29,36 @@ class EffectType(app_commands.Transform, str, Enum):
     THREE_COLOR = "three-color"
     SOLID = "solid"
 
-class MyClient(discord.Client):
-    def __init__(self):
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        await self.tree.sync(guild=discord.Object(id=GUILD_ID))
-
-client = MyClient()
+@bot.event
+async def on_ready():
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"✅ Logged in as {bot.user}")
 
 # ────────────── /calculate COMMAND ──────────────
-@client.tree.command(name="calculate", description="Calculate BPM based on snap", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="calculate", description="Calculate BPM based on snap", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     bpm="Base BPM",
     desired_snap="Desired snap value (e.g. 4, 8, 16)",
     base_snap="Base snap value (e.g. 4, 8, 16)"
 )
-async def calculate(interaction: discord.Interaction, bpm: float, desired_snap: int, base_snap: int):
+async def slash_calculate(interaction: discord.Interaction, bpm: float, desired_snap: int, base_snap: int):
     if base_snap == 0:
         await interaction.response.send_message("⚠️ base_snap cannot be zero!", ephemeral=True)
         return
     result = (bpm * desired_snap) / base_snap
     await interaction.response.send_message(f"🎵 Result: `{result:.2f} BPM`")
 
+# Prefix version
+@bot.command(name="calculate")
+async def prefix_calculate(ctx, bpm: float, desired_snap: int, base_snap: int):
+    if base_snap == 0:
+        await ctx.send("⚠️ base_snap cannot be zero!")
+        return
+    result = (bpm * desired_snap) / base_snap
+    await ctx.send(f"🎵 Result: `{result:.2f} BPM`")
+
 # ────────────── /bbcode COMMAND ──────────────
-@client.tree.command(name="bbcode", description="Generate BBCode with gradient and styling", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="bbcode", description="Generate BBCode with gradient and styling", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     text="The text to style",
     effect="Gradient effect type",
@@ -64,7 +70,7 @@ async def calculate(interaction: discord.Interaction, bpm: float, desired_snap: 
     bold="Make text bold?",
     italic="Make text italic?"
 )
-async def bbcode(
+async def slash_bbcode(
     interaction: discord.Interaction,
     text: str,
     effect: EffectType,
@@ -76,8 +82,15 @@ async def bbcode(
     bold: bool = False,
     italic: bool = False,
 ):
-    effect = effect.value
+    await bbcode_common(interaction.response.send_message, text, effect.value, start_color, middle_color, end_color, font, size, bold, italic)
 
+# Prefix version
+@bot.command(name="bbcode")
+async def prefix_bbcode(ctx, effect: str, start_color: str, text: str, end_color: str = None, middle_color: str = None, font: str = None, size: str = None, bold: bool = False, italic: bool = False):
+    await bbcode_common(ctx.send, text, effect.lower(), start_color, middle_color, end_color, font, size, bold, italic)
+
+# ────────────── Shared BBCode Logic ──────────────
+async def bbcode_common(send_func, text, effect, start_color, middle_color, end_color, font, size, bold, italic):
     def interpolate(c1, c2, t):
         c1 = [int(c1[i:i+2], 16) for i in (1, 3, 5)]
         c2 = [int(c2[i:i+2], 16) for i in (1, 3, 5)]
@@ -99,26 +112,22 @@ async def bbcode(
                 result += f"[color={color}]{ch}[/color]"
         return result
 
-    # Apply effect logic
     if effect == "solid":
         bbcode_text = f"[color={start_color}]{text}[/color]"
     elif effect == "horizontal":
         if not end_color:
-            await interaction.response.send_message("⚠️ You must provide `end_color` for horizontal effect.", ephemeral=True)
+            await send_func("⚠️ You must provide `end_color` for horizontal effect.")
             return
         bbcode_text = apply_gradient(text, [start_color, end_color])
-    elif effect == "middle":
+    elif effect == "middle" or effect == "three-color":
         if not middle_color or not end_color:
-            await interaction.response.send_message("⚠️ You must provide both `middle_color` and `end_color` for middle effect.", ephemeral=True)
+            await send_func("⚠️ You must provide both `middle_color` and `end_color`.")
             return
         bbcode_text = apply_gradient(text, [start_color, middle_color, end_color])
-    elif effect == "three-color":
-        if not middle_color or not end_color:
-            await interaction.response.send_message("⚠️ You must provide both `middle_color` and `end_color` for three-color effect.", ephemeral=True)
-            return
-        bbcode_text = apply_gradient(text, [start_color, middle_color, end_color])
+    else:
+        await send_func("⚠️ Unknown effect type. Use one of: solid, horizontal, middle, three-color.")
+        return
 
-    # Apply styles
     if font:
         bbcode_text = f"[font={font}]{bbcode_text}[/font]"
     if size:
@@ -128,9 +137,7 @@ async def bbcode(
     if italic:
         bbcode_text = f"[i]{bbcode_text}[/i]"
 
-    await interaction.response.send_message(f"🎨 Generated BBCode:\n```\n{bbcode_text}\n```")
+    await send_func(f"🎨 Generated BBCode:\n```\n{bbcode_text}\n```")
 
 # ────────────── RUN BOT ──────────────
-client.run(token)
-
-
+bot.run(token)
